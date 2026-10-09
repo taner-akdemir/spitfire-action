@@ -1,0 +1,20 @@
+# Compare the release in staging with production under the same load, at the
+# same time; fail when the new release is worse (exit 98).
+name: Release comparison
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: taner-akdemir/spitfire-action@v1
+        with:
+          url: https://spitfire.example.com
+          token: ${{ secrets.SPITFIRE_TOKEN }}
+          test: "Checkout API"
+          compare: A=production,B=staging
+          locations: |
+            istanbul=60:2
+            frankfurt=40:1

@@ -1,0 +1,190 @@
+name: Spitfire load test
+description: Run a load test saved on your self-hosted Spitfire as a performance gate, with a pull request summary.
+author: Algebran Yazılım
+branding:
+  icon: activity
+  color: orange
+
+inputs:
+  url:
+    description: Your Spitfire controller's URL, e.g. https://spitfire.example.com
+    required: true
+  token:
+    description: A personal API token (Spitfire → user menu → API tokens). Pass it from a secret.
+    required: true
+  test:
+    description: The saved test's name or id.
+    required: true
+  environment:
+    description: One of the test's environments to run against, e.g. staging.
+    required: false
+  compare:
+    description: "A comparative run against two of the test's environments at once, e.g. A=prod,B=staging (A the reference, B the candidate)."
+    required: false
+  runners:
+    description: Number of idle runners to use (ignored with locations).
+    required: false
+    default: "1"
+  locations:
+    description: "Split by location, one per line: name=percent[:runners], e.g. istanbul=60:2"
+    required: false
+  scale:
+    description: Multiply the load (virtual users, rates), e.g. 0.5 or 2.
+    required: false
+  vars:
+    description: "Test variables for this run, one per line: name=value"
+    required: false
+  confirm-writes:
+    description: Allow a test whose steps modify data (SQL/Mongo writes, Redis, HTTP writes).
+    required: false
+    default: "false"
+  pr-comment:
+    description: "Post the summary on the pull request and update it on later pushes: true, false, or auto (on pull_request events)."
+    required: false
+    default: auto
+  github-token:
+    description: Token for the pull request comment (needs pull-requests write).
+    required: false
+    default: ${{ github.token }}
+  report:
+    description: Write the run report to this file (report.pdf or report.html).
+    required: false
+  report-lang:
+    description: Report and summary language, en or tr.
+    required: false
+    default: en
+  summary:
+    description: Where to write the run summary JSON.
+    required: false
+    default: spitfire-summary.json
+  timeout:
+    description: Stop the run and fail after this long, e.g. 45m (default the planned duration + 15m).
+    required: false
+  fail-on-inconclusive:
+    description: With compare, fail when the verdict is inconclusive.
+    required: false
+    default: "false"
+  fail:
+    description: Fail the step when the test fails its thresholds (exit 99, 97) or the candidate is worse (98). false records the result only.
+    required: false
+    default: "true"
+  workspace:
+    description: Workspace name or id (default the token's).
+    required: false
+  insecure:
+    description: Do not verify the controller's TLS certificate (a test controller with a self-signed certificate only).
+    required: false
+    default: "false"
+
+outputs:
+  exit-code:
+    description: "The CLI's exit code: 0 passed, 99 thresholds failed, 97 aborted by a threshold, 98 the candidate is worse, 1 error, 2 writes not confirmed."
+    value: ${{ steps.run.outputs.exit-code }}
+  result:
+    description: passed, failed, aborted, worse or error
+    value: ${{ steps.run.outputs.result }}
+  summary:
+    description: Path of the run summary JSON.
+    value: ${{ steps.run.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - name: Get the Spitfire CLI from the controller
+      shell: bash
+      env:
+        SF_URL: ${{ inputs.url }}
+        SF_INSECURE: ${{ inputs.insecure }}
+      run: |
+        set -euo pipefail
+        case "${RUNNER_OS}/${RUNNER_ARCH}" in
+          Linux/X64)     file=spitfire-cli-linux-amd64.gz ;;
+          Linux/ARM64)   file=spitfire-cli-linux-arm64.gz ;;
+          Windows/X64)   file=spitfire-cli-windows-amd64.exe ;;
+          *) echo "::error::Spitfire's CLI is built for Linux (x64, arm64) and Windows (x64); this runner is ${RUNNER_OS}/${RUNNER_ARCH}. Use runs-on: ubuntu-latest."; exit 1 ;;
+        esac
+        dir="${RUNNER_TEMP}/spitfire-cli"; mkdir -p "$dir"
+        k=""; [ "$SF_INSECURE" = "true" ] && k="-k"
+        # the controller serves the CLI of its own version, with its SHA-256 in a header
+        hdr="$(curl -fsS $k -D - -o "$dir/$file" "${SF_URL%/}/api/v1/runner-dist/$file" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-content-sha256"{print $2}')"
+        got="$(sha256sum "$dir/$file" | cut -d' ' -f1)"
+        if [ -z "$hdr" ] || [ "$hdr" != "$got" ]; then
+          echo "::error::The CLI downloaded from ${SF_URL} does not match its checksum (expected '${hdr}', got '${got}')."; exit 1
+        fi
+        case "$file" in
+          *.gz) gunzip -c "$dir/$file" > "$dir/spitfire"; chmod +x "$dir/spitfire"; rm "$dir/$file" ;;
+          *.exe) mv "$dir/$file" "$dir/spitfire.exe" ;;
+        esac
+        echo "$dir" >> "$GITHUB_PATH"
+        echo "Spitfire CLI from ${SF_URL} (sha256 ${got})"
+
+    - name: Run the load test
+      id: run
+      shell: bash
+      env:
+        SPITFIRE_URL: ${{ inputs.url }}
+        SPITFIRE_TOKEN: ${{ inputs.token }}
+        SPITFIRE_WORKSPACE: ${{ inputs.workspace }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        IN_TEST: ${{ inputs.test }}
+        IN_ENV: ${{ inputs.environment }}
+        IN_COMPARE: ${{ inputs.compare }}
+        IN_RUNNERS: ${{ inputs.runners }}
+        IN_LOCATIONS: ${{ inputs.locations }}
+        IN_SCALE: ${{ inputs.scale }}
+        IN_VARS: ${{ inputs.vars }}
+        IN_CONFIRM: ${{ inputs.confirm-writes }}
+        IN_PR: ${{ inputs.pr-comment }}
+        IN_REPORT: ${{ inputs.report }}
+        IN_LANG: ${{ inputs.report-lang }}
+        IN_SUMMARY: ${{ inputs.summary }}
+        IN_TIMEOUT: ${{ inputs.timeout }}
+        IN_INCONCLUSIVE: ${{ inputs.fail-on-inconclusive }}
+        IN_FAIL: ${{ inputs.fail }}
+        IN_INSECURE: ${{ inputs.insecure }}
+        EVENT: ${{ github.event_name }}
+      run: |
+        set -uo pipefail
+        args=(cloud run "$IN_TEST" -o "$IN_SUMMARY" --report-lang "$IN_LANG")
+        md="${RUNNER_TEMP}/spitfire-summary.md"
+        args+=(--summary-md "$md")
+        [ -n "$IN_ENV" ] && args+=(--env "$IN_ENV")
+        [ -n "$IN_COMPARE" ] && args+=(--compare "$IN_COMPARE")
+        [ -n "$IN_SCALE" ] && args+=(--scale "$IN_SCALE")
+        [ -n "$IN_REPORT" ] && args+=(--report "$IN_REPORT")
+        [ -n "$IN_TIMEOUT" ] && args+=(--timeout "$IN_TIMEOUT")
+        [ "$IN_CONFIRM" = "true" ] && args+=(--confirm-writes)
+        [ "$IN_INCONCLUSIVE" = "true" ] && args+=(--fail-on-inconclusive)
+        [ "$IN_INSECURE" = "true" ] && args+=(--insecure)
+        if [ -n "$IN_LOCATIONS" ]; then
+          while IFS= read -r l; do l="$(echo "$l" | xargs)"; [ -n "$l" ] && args+=(-l "$l"); done <<< "$IN_LOCATIONS"
+        else
+          args+=(-r "$IN_RUNNERS")
+        fi
+        if [ -n "$IN_VARS" ]; then
+          while IFS= read -r v; do v="$(echo "$v" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"; [ -n "$v" ] && args+=(--var "$v"); done <<< "$IN_VARS"
+        fi
+        case "$IN_PR" in
+          true) args+=(--pr-comment) ;;
+          auto) case "$EVENT" in pull_request|pull_request_target) args+=(--pr-comment) ;; esac ;;
+        esac
+
+        spitfire "${args[@]}"
+        code=$?
+        case "$code" in
+          0) result=passed ;; 99) result=failed ;; 97) result=aborted ;; 98) result=worse ;; *) result=error ;;
+        esac
+        {
+          echo "exit-code=$code"
+          echo "result=$result"
+          echo "summary=$IN_SUMMARY"
+        } >> "$GITHUB_OUTPUT"
+        [ -s "$md" ] && cat "$md" >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$code" -ne 0 ]; then
+          case "$code" in
+            99|97|98) [ "$IN_FAIL" = "true" ] && { echo "::error::Spitfire: the load test ${result} (exit ${code})."; exit "$code"; }
+                      echo "::warning::Spitfire: the load test ${result} (exit ${code}); fail: false keeps the step green." ;;
+            *) echo "::error::Spitfire: the run could not be completed (exit ${code})."; exit "$code" ;;
+          esac
+        fi
