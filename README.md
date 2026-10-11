@@ -1,6 +1,6 @@
 # Spitfire load test — GitHub Action
 
-Run a load test saved on your self-hosted [Spitfire](https://spitfire.tr/en) as a performance gate: the step
+Run a load test saved on your self-hosted [Spitfire](https://usespitfire.com) as a performance gate: the step
 fails when a threshold fails, the pull request gets a summary comment (updated on later pushes), and the job
 summary shows the per-step results.
 
@@ -70,7 +70,7 @@ the SHA-256 the controller sends.
 | `summary` | Path of the summary JSON |
 
 More examples: [`examples/`](examples) (a pull request gate with the report as an artifact, a release
-comparison across two locations). Documentation: [CI/CD with Spitfire](https://spitfire.tr/en/docs/ci-cd).
+comparison across two locations). Documentation: [CI/CD with Spitfire](https://usespitfire.com/docs/ci-cd).
 
 Runners: Linux (x64, arm64) and Windows (x64).
 
@@ -82,4 +82,4 @@ a failing threshold with `fail` true and false, an unknown test.
 
 ## License
 
-MIT. Spitfire itself is commercial software with a free edition: [spitfire.tr/en](https://spitfire.tr/en).
+MIT. Spitfire itself is commercial software with a free edition: [spitfire.tr/en](https://usespitfire.com).
