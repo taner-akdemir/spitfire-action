@@ -1,6 +1,6 @@
 name: Spitfire load test
 description: Run a load test saved on your self-hosted Spitfire as a performance gate, with a pull request summary.
-author: Algebran Yazılım
+author: Spitfire
 branding:
   icon: activity
   color: orange

@@ -14,7 +14,7 @@ jobs:
   load-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: taner-akdemir/spitfire-action@v1
+      - uses: usespitfire/spitfire-action@v1
         with:
           url: https://spitfire.example.com
           token: ${{ secrets.SPITFIRE_TOKEN }}
